@@ -1,0 +1,17 @@
+# R
+.Rhistory
+.RData
+.Rproj.user/
+*.Rproj
+
+# rmarkdown knitting artifacts (the HTML report is self-contained and
+# tracked directly in report/, so cache/intermediate files aren't needed)
+*_cache/
+*_files/
+
+# Per-figure exports — regenerated on render, already embedded in the
+# knitted HTML report; not tracked to keep the repo light
+outputs/
+
+# Windows-origin file markers (WSL)
+*:Zone.Identifier

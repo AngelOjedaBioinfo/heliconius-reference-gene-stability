@@ -1,0 +1,1063 @@
+---
+title: "REFERENCE GENES IN *Heliconius erato lativitta*"
+author: "Angel Ojeda"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    fig_height: 4
+    fig_width: 6
+    highlight: tango
+    theme: cerulean
+    toc: yes
+    toc_depth: 5
+    toc_float:
+      collapsed: yes
+      smooth_scroll: yes
+subtitle: "DATA ANALYSIS"
+---
+
+```{r setup, include=FALSE}
+rm(list = ls())
+options(scipen = 999, encoding = "utf-8")
+
+pkgs <- c("knitr", "rmarkdown", "readxl", "dplyr", "ggplot2", "ggpubr",
+          "rstatix", "tidyr", "car", "broom", "purrr", "scales", "kableExtra",
+          "patchwork")
+
+invisible(lapply(pkgs, function(p) {
+  if (!requireNamespace(p, quietly = TRUE)) install.packages(p)
+  library(p, character.only = TRUE)
+}))
+
+opts_chunk$set(warning = FALSE, message = FALSE, echo = FALSE)
+opts_knit$set(width = 75)
+options(max.print = 200)
+options(knitr.table.format = "html")   # ensures cell_spec HTML renders correctly
+```
+
+```{r helper-functions, include=FALSE}
+# ── Significance codes (vectorized) ──────────────────────────────────────────
+sig_code <- function(p) {
+  dplyr::case_when(
+    is.na(p)  ~ "NA",
+    p < 0.001 ~ "***",
+    p < 0.01  ~ "**",
+    p < 0.05  ~ "*",
+    p < 0.1   ~ ".",
+    TRUE      ~ "ns"
+  )
+}
+
+# ── Freedman–Diaconis optimal binwidth ────────────────────────────────────────
+fd_binwidth <- function(x) {
+  x <- x[!is.na(x)]
+  2 * IQR(x) / length(x)^(1 / 3)
+}
+
+# ── Mean ± SD summary by groups ──────────────────────────────────────────────
+data_summary <- function(data, varname, groupnames) {
+  data %>%
+    group_by(across(all_of(groupnames))) %>%
+    summarise(
+      !!paste0(varname, "_mean") := mean(.data[[varname]], na.rm = TRUE),
+      !!paste0(varname, "_sd")   := sd(.data[[varname]],   na.rm = TRUE),
+      .groups = "drop"
+    )
+}
+
+# ── kableExtra formatted table with significance coloring ────────────────────
+sig_table <- function(df, caption = NULL) {
+  sig_idx  <- which(names(df) %in% c("Signif", "signif"))[1]
+  sig_vals <- df[[sig_idx]]
+
+  bg <- dplyr::case_when(
+    sig_vals == "***" ~ "#c0392b",
+    sig_vals == "**"  ~ "#e67e22",
+    sig_vals == "*"   ~ "#f39c12",
+    sig_vals == "."   ~ "#95a5a6",
+    TRUE              ~ "#ecf0f1"
+  )
+  txt <- ifelse(sig_vals %in% c("***", "**", "*"), "white", "black")
+
+  df %>%
+    kable(caption = caption, align = "c", digits = 4,
+          format.args = list(scientific = TRUE)) %>%
+    kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                  full_width = FALSE, font_size = 12) %>%
+    column_spec(sig_idx, color = txt, background = bg) %>%
+    scroll_box(width = "100%")
+}
+
+# ── Distribution plots (density + histogram) ─────────────────────────────────
+#   Returns a ggarrange composite figure
+plot_distribution <- function(data, x_var, group_var,
+                               title_prefix, x_label,
+                               fill_color = "#FF6666", ncols = 2) {
+  groups <- unique(data[[group_var]])
+  plots  <- lapply(groups, function(grp) {
+    df <- data %>% filter(.data[[group_var]] == grp)
+    bw <- fd_binwidth(df[[x_var]])
+    ggplot(df, aes(x = .data[[x_var]])) +
+      geom_density(color = "black", linewidth = 0.6,
+                   alpha = 0.25, fill = fill_color) +
+      geom_histogram(aes(y = after_stat(density)), binwidth = bw,
+                     colour = "black", fill = "white", alpha = 0.3) +
+      labs(title = paste(title_prefix, grp),
+           x = x_label, y = "Density") +
+      scale_y_continuous(labels = scientific_format()) +
+      theme_classic() +
+      theme(axis.line  = element_line(color = "black", linewidth = 0.7),
+            plot.title = element_text(hjust = 0.5, size = 11))
+  })
+  do.call(ggarrange, c(plots,
+                        list(ncol = ncols,
+                             nrow = ceiling(length(plots) / ncols),
+                             common.legend = TRUE, legend = "bottom")))
+}
+
+# ── Levene test loop over groups ─────────────────────────────────────────────
+run_levene <- function(data, response_var, group_var, formula_rhs) {
+  groups  <- unique(data[[group_var]])
+  results <- lapply(groups, function(grp) {
+    df  <- data %>% filter(.data[[group_var]] == grp)
+    fml <- as.formula(paste(response_var, "~", formula_rhs))
+    res <- leveneTest(fml, data = df)
+    data.frame(
+      Group   = as.character(grp),
+      F_value = round(res$`F value`[1], 4),
+      Pr_F    = res$`Pr(>F)`[1],
+      Signif  = sig_code(res$`Pr(>F)`[1]),
+      stringsAsFactors = FALSE
+    )
+  })
+  result <- do.call(rbind, results)
+  names(result)[1] <- group_var
+  result
+}
+
+# ── Fit a named list of GLMs ──────────────────────────────────────────────────
+fit_glm_list <- function(data, response_var, group_var,
+                          formula_rhs, family) {
+  groups <- unique(data[[group_var]])
+  models <- lapply(groups, function(grp) {
+    df  <- data %>% filter(.data[[group_var]] == grp)
+    fml <- as.formula(paste(response_var, "~", formula_rhs))
+    glm(fml, data = df, family = family)
+  })
+  names(models) <- as.character(groups)
+  models
+}
+
+# ── ANOVA Type II LR test from a named list of GLMs ──────────────────────────
+#   Uses LR chi-square test for both Gamma and Gaussian GLMs.
+#   Note: car::Anova() applied to glm objects always returns LR Chisq columns
+#   regardless of family, so F-test must be handled via lm() objects instead.
+#   For gaussian(link="identity"), LR and F-test conclusions are equivalent.
+glm_list_anova <- function(model_list, group_var) {
+  results <- lapply(names(model_list), function(nm) {
+    mod    <- model_list[[nm]]
+    aov_df <- as.data.frame(
+      Anova(mod, type = "II", test.statistic = "LR"))
+    data.frame(
+      Group    = nm,
+      Term     = rownames(aov_df),
+      Df       = aov_df$Df,
+      LR_Chisq = round(aov_df$`LR Chisq`, 3),
+      Pr_Chi   = aov_df$`Pr(>Chisq)`,
+      Signif   = sig_code(aov_df$`Pr(>Chisq)`),
+      stringsAsFactors = FALSE, row.names = NULL
+    )
+  })
+  result <- do.call(rbind, results)
+  names(result)[1] <- group_var
+  result
+}
+
+# ── QQ-plots from a named list of GLMs ───────────────────────────────────────
+plot_qq <- function(model_list, ncols = 2) {
+  plots <- lapply(names(model_list), function(nm) {
+    res <- residuals(model_list[[nm]])
+    ggqqplot(res,
+             xlab = "Theoretical Quantiles",
+             ylab = "Sample Quantiles",
+             ggtheme = theme_pubr()) +
+      ggtitle(paste("Q-Q Residuals:", nm)) +
+      theme(plot.title = element_text(hjust = 0.5, size = 11, face = "bold"),
+            axis.title = element_text(size = 10),
+            axis.text  = element_text(size = 9))
+  })
+  do.call(ggarrange, c(plots,
+                        list(ncol = ncols,
+                             nrow = ceiling(length(plots) / ncols),
+                             common.legend = TRUE, legend = "bottom")))
+}
+
+# ── Residual histograms from a named list of GLMs ────────────────────────────
+plot_residuals <- function(model_list, ncols = 2) {
+  plots <- lapply(names(model_list), function(nm) {
+    res <- residuals(model_list[[nm]])
+    bw  <- fd_binwidth(res)
+    ggplot(data.frame(res = res), aes(x = res)) +
+      geom_density(color = "black", linewidth = 0.6,
+                   alpha = 0.8, fill = "lightblue") +
+      geom_histogram(aes(y = after_stat(density)), binwidth = bw,
+                     colour = "black", fill = "white", alpha = 0.3) +
+      labs(title = paste("Residuals:", nm),
+           x = "Residuals", y = "Density") +
+      theme_classic() +
+      theme(axis.line  = element_line(color = "black", linewidth = 0.7),
+            plot.title = element_text(hjust = 0.5, size = 11, face = "bold"),
+            axis.title = element_text(size = 10),
+            axis.text  = element_text(size = 9))
+  })
+  do.call(ggarrange, c(plots,
+                        list(ncol = ncols,
+                             nrow = ceiling(length(plots) / ncols),
+                             common.legend = TRUE, legend = "bottom")))
+}
+
+# ── AIC comparison: additive vs interaction ───────────────────────────────────
+compare_aic <- function(data, response_var, group_var,
+                         formula_add, formula_int, family) {
+  groups  <- unique(data[[group_var]])
+  results <- lapply(groups, function(grp) {
+    df      <- data %>% filter(.data[[group_var]] == grp)
+    mod_add <- glm(as.formula(paste(response_var, "~", formula_add)),
+                   data = df, family = family)
+    mod_int <- glm(as.formula(paste(response_var, "~", formula_int)),
+                   data = df, family = family)
+    aic_a   <- round(AIC(mod_add), 2)
+    aic_i   <- round(AIC(mod_int), 2)
+    data.frame(
+      Group           = as.character(grp),
+      AIC_Additive    = aic_a,
+      AIC_Interaction = aic_i,
+      Delta_AIC       = round(aic_a - aic_i, 2),
+      Preferred       = ifelse(aic_i < aic_a - 2, "Interaction", "Additive"),
+      stringsAsFactors = FALSE
+    )
+  })
+  result <- do.call(rbind, results)
+  names(result)[1] <- group_var
+  result
+}
+
+# ── Auto family candidates based on data range ────────────────────────────────
+#   Gamma requires strictly positive Y. If Y has zeros or negatives, only
+#   Gaussian(identity) is returned — no AIC selection is needed.
+auto_family_candidates <- function(y) {
+  if (any(y <= 0, na.rm = TRUE)) {
+    list("Gaussian(identity)" = gaussian(link = "identity"))
+  } else {
+    list(
+      "Gamma(log)"         = Gamma(link = "log"),
+      "Gamma(inverse)"     = Gamma(link = "inverse"),
+      "Gaussian(identity)" = gaussian(link = "identity")
+    )
+  }
+}
+
+# ── AIC-based family selection per group ──────────────────────────────────────
+#   Fits all valid candidate families for each group using the additive formula.
+#   Convergence warnings are suppressed (informative but not critical for AIC).
+#   If only one family is valid, returns NULL (no selection needed).
+family_selection_aic <- function(data, response_var, group_var, formula_rhs) {
+  candidates <- auto_family_candidates(data[[response_var]])
+
+  if (length(candidates) == 1L) return(NULL)   # auto-selected, skip
+
+  groups  <- unique(data[[group_var]])
+  results <- lapply(groups, function(grp) {
+    df <- data %>% filter(.data[[group_var]] == grp)
+
+    aics <- sapply(names(candidates), function(fam_name) {
+      mod <- tryCatch(
+        suppressWarnings(
+          glm(as.formula(paste(response_var, "~", formula_rhs)),
+              data = df, family = candidates[[fam_name]])
+        ),
+        error = function(e) NULL
+      )
+      if (is.null(mod)) Inf else AIC(mod)
+    })
+
+    row              <- as.data.frame(t(round(aics, 2)))
+    row[[group_var]] <- as.character(grp)
+    row$Best         <- names(candidates)[which.min(aics)]
+    row
+  })
+
+  result <- do.call(rbind, results)
+  result[, c(group_var, names(candidates), "Best")]
+}
+
+# ── Consensus family: family that wins in the most groups ─────────────────────
+get_consensus_family <- function(aic_table, data, response_var) {
+  candidates  <- auto_family_candidates(data[[response_var]])
+  best_counts <- sort(table(aic_table$Best), decreasing = TRUE)
+  cname       <- names(best_counts)[1]
+  list(
+    name    = cname,
+    family  = candidates[[cname]],
+    counts  = best_counts,
+    n_total = nrow(aic_table)
+  )
+}
+
+# ── Format AIC table for kable: highlight winner per row in green ─────────────
+format_family_table <- function(aic_df, group_var) {
+  fam_cols <- setdiff(names(aic_df), c(group_var, "Best"))
+  display  <- aic_df
+
+  # Convert AIC columns to character to accept cell_spec HTML
+  display[, fam_cols] <- lapply(display[, fam_cols], as.character)
+
+  for (i in seq_len(nrow(aic_df))) {
+    row_vals <- as.numeric(aic_df[i, fam_cols])
+    min_col  <- fam_cols[which.min(row_vals)]
+
+    for (col in fam_cols) {
+      val <- round(as.numeric(aic_df[i, col]), 2)
+      if (!is.finite(val)) {
+        display[i, col] <- cell_spec("—", color = "#95a5a6", italic = TRUE)
+      } else if (col == min_col) {
+        display[i, col] <- cell_spec(val, background = "#27ae60",
+                                      color = "white", bold = TRUE)
+      } else {
+        display[i, col] <- as.character(val)
+      }
+    }
+  }
+  display
+}
+
+# ── Barplot function for EGR (worst / best genes) ────────────────────────────
+#   quality_label is shown as a styled badge inside the plot (top-left),
+#   so it integrates with the design without replacing any existing element.
+barplot_egr <- function(data_egr, quality_label,
+                         y_label = "Relative Gene Expression — log(EGR)") {
+  df <- data_summary(data_egr, varname = "Log_EGR",
+                     groupnames = c("Tissue", "Treatment", "Sex")) %>%
+    mutate(Tissue = dplyr::recode(Tissue,
+                                  "A" = "Abdomen",
+                                  "H" = "Head",
+                                  "T" = "Thorax"))
+
+  y_min    <- min(df$Log_EGR_mean - df$Log_EGR_sd, na.rm = TRUE)
+  y_max    <- max(df$Log_EGR_mean + df$Log_EGR_sd, na.rm = TRUE)
+  y_limits <- c(floor(y_min), ceiling(y_max))
+
+  ggplot(df, aes(x = Tissue, y = Log_EGR_mean, fill = Treatment)) +
+    geom_bar(stat = "identity", color = "black",
+             position = position_dodge()) +
+    geom_errorbar(aes(
+      ymin = ifelse(Log_EGR_mean >= 0, Log_EGR_mean, Log_EGR_mean - Log_EGR_sd),
+      ymax = ifelse(Log_EGR_mean >= 0, Log_EGR_mean + Log_EGR_sd, Log_EGR_mean)),
+                  width = 0.2, position = position_dodge(0.9)) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+    # ── Quality badge: dark teal label in top-left of plot area ──────────────
+    annotate("label",
+             x          = -Inf,
+             y          = Inf,
+             label      = toupper(quality_label),
+             hjust      = -0.15,
+             vjust      = 1.4,
+             fontface   = "bold",
+             size       = 4.5,
+             fill       = "#264653",
+             color      = "white",
+             label.size = 0,
+             label.padding = unit(0.35, "lines")) +
+    facet_grid(. ~ Sex) +
+    scale_fill_manual(values = c("#264653", "#b5b5b5", "#f4a261")) +
+    scale_y_continuous(limits = y_limits,
+                       breaks = seq(y_limits[1], y_limits[2], 1)) +
+    labs(fill = "Treatment",
+         y    = y_label,
+         x    = "Tissue") +
+    theme(
+      panel.background = element_blank(),
+      panel.border     = element_rect(color = "black", fill = NA),
+      strip.background = element_rect(fill = "gray90", color = "black"),
+      strip.text       = element_text(size = 14, face = "bold"),
+      axis.title       = element_text(size = 14),
+      axis.text        = element_text(size = 12),
+      legend.title     = element_text(size = 12),
+      legend.text      = element_text(size = 10)
+    )
+}
+```
+
+---
+
+Angel Ojeda  - `angel.ojeda@ikiam.edu.ec` - Universidad Regional Amazónica IKIAM, Tena (Ecuador)
+
+Paola Calderón  - `pcalderon@stri.pa` - Instituto Smithsoniano de investigaciones tropicales, Gamboa (Panamá)
+
+Joshué Ruiz  - `joshue.ruiz@ikiam.edu.ec` - Universidad Regional Amazónica IKIAM, Tena (Ecuador)
+
+Leo Camino  - `lcamino@stri.pa` - Instituto Smithsoniano de investigaciones tropicales, Gamboa (Panamá)
+
+Shane Wright  - `dswright@bio.lmu.de` - Munich University (Germany)
+
+Caroline Bacquet - `caroline.bacquet@ikiam.edu.ec` - Universidad Regional Amazónica IKIAM, Tena (Ecuador)
+
+---
+
+```{r load-data, include=FALSE}
+# NOTE: This script lives in analysis/. Data lives in ../data/All_data.xlsx
+# (relative to this file) — knitr sets the working directory to the Rmd's
+# own location automatically, so no setwd() is needed.
+
+dir.create("../outputs", showWarnings = FALSE)   # Save all figures here (gitignored)
+
+# ── Ct data ─────────────────────────────────────────────────────────────────
+data_ct <- read_excel("../data/All_data.xlsx", sheet = "Cq_tagged") %>%
+  mutate(
+    Gene      = as.factor(Gene),
+    Treatment = as.factor(Treatment),
+    Sex       = as.factor(Sex),
+    Tissue    = as.factor(Tissue),
+    Ct        = as.numeric(Ct)
+  ) %>%
+  na.omit()
+
+str(data_ct)
+
+# ── EGR data ─────────────────────────────────────────────────────────────────
+data_EGR <- read_excel("../data/All_data.xlsx", sheet = "EGR") %>%
+  mutate(
+    Gene      = as.factor(Gene),
+    Quality   = as.factor(Quality),
+    Treatment = as.factor(Treatment),
+    Sex       = as.factor(Sex),
+    Tissue    = as.factor(Tissue),
+    EGR       = as.numeric(EGR),
+    Log_EGR   = as.numeric(Log_EGR)
+  ) %>%
+  na.omit()
+
+str(data_EGR)
+
+# ── Figure height variables (computed once, reused in chunk options) ──────────
+n_genes       <- length(unique(data_ct$Gene))
+fig_h_ct      <- ceiling(n_genes / 2) * 3.5   # ~3.5 in per row of 2 panels
+n_quality     <- length(unique(data_EGR$Quality))
+fig_h_egr_bar <- n_quality * 5.0              # ~5 in per quality group
+```
+
+# 1. Ct Analysis
+
+## 1.1. Ct Summary
+
+```{r ct-summary, echo=FALSE}
+summary(data_ct) %>%
+  kable(caption = "Summary statistics — Ct values") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE, font_size = 12) %>%
+  scroll_box(width = "100%")
+```
+
+## 1.2. Ct Boxplot
+
+####### I made changes in this part, because we agreed to split the information in three boxplots i.e sex, tissue and treatment####
+
+```{r ct-boxplot, fig.width=10, fig.height=6}
+p_box <- ggplot(data_ct, aes(x = Gene, y = Ct,  fill = Treatment)) +
+  geom_boxplot(outlier.shape = NA, color = "black") +
+  labs(x = "Gene", y = "Ct") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_blank(),
+    axis.text.y = element_text(face= 2, size = 13, color = "black"),
+    axis.title.y = element_text(size =16, face = 2),
+    axis.title.x = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_rect(fill = "white", color = "black"),
+    legend.title = element_text(face = "bold", size =12),
+    legend.position = "right",
+    legend.text = element_text(size= 10),
+    axis.ticks.x = element_blank(),
+    axis.ticks = element_line(colour = "black", linewidth = 1)
+  ) +
+  scale_fill_manual(values = c("Cold" = "#118ab2", "Heat" = "#ff9f1c", "Control" = "#8d99ae"))
+
+################################################################################
+
+condition_order <- c("H", "T", "A")
+data_ct$Tissue <- factor(data_ct$Tissue, levels = condition_order)
+boxplot_tissue<- ggplot(data_ct, aes(x = Gene, y = Ct, fill = Tissue)) +
+   geom_boxplot(outlier.shape = NA, colour = "black", linewidth = 0.5) + 
+  
+  labs(
+    title = " ",
+    x = "Genes",
+    y = "Ct"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_blank(),
+    axis.text.y = element_text(face= 2, size = 13, color = "black"),
+    axis.title.y = element_text(size =16, face = 2),
+    axis.title.x = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_rect(fill = "white", color = "black"),
+    legend.title = element_text(face = "bold", size =12),
+    legend.position = "right",
+    legend.text = element_text(size= 10),
+    axis.ticks.x = element_blank(),
+    axis.ticks = element_line(colour = "black", linewidth = 1)
+  ) +
+  scale_fill_manual(values = c("H" = "#457b9d", "A" = "#f26419", "T" = "#f4d35e" ))
+
+
+print(boxplot_tissue)
+###########################################################
+boxplot_sex<- ggplot(data_ct, aes(x = Gene, y = Ct, fill = Sex)) +
+   geom_boxplot(outlier.shape = NA, colour = "black", linewidth = 0.5) +  
+  labs(
+    title = " ",
+    x = "Genes",
+    y = "Ct"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(face="italic", size = 13, color = "black"),
+    axis.text.y = element_text(face= 2, size = 13, color = "black"),
+    axis.title.y = element_text(size =15, face = 2),
+    axis.title.x = element_text(size =15, face = 2),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_rect(fill = "white", color = "black"),
+    legend.title = element_text(face = "bold", size =12),
+    legend.position = "right",
+    legend.text = element_text(size= 10),
+    axis.ticks = element_line(colour = "black", linewidth = 1)
+  ) +
+  scale_fill_manual(values = c("Male" = "#606c38", "Female" = "#bc6c25"))
+
+
+print(boxplot_sex)
+###############################################################################
+combined_plot <- p_box / boxplot_tissue / boxplot_sex +
+  plot_layout(heights = c(1, 1, 1)) 
+print(combined_plot)
+
+
+ggsave("../outputs/01_Ct_boxplot.png", plot = combined_plot, width = 10, height = 6, dpi = 400)
+```
+
+
+## 1.3. Ct Distribution
+
+```{r ct-distribution, fig.width=10, fig.height=fig_h_ct}
+p_ct_dist <- plot_distribution(
+  data         = data_ct,
+  x_var        = "Ct",
+  group_var    = "Gene",
+  title_prefix = "Ct distribution —",
+  x_label      = "Ct"
+)
+
+print(p_ct_dist)
+ggsave("../outputs/02_Ct_distribution.png", plot = p_ct_dist,
+       width = 10, height = fig_h_ct, dpi = 400)
+```
+
+### 1.3.1. Ct Homogeneity of Variance (Levene Test)
+
+> Tests whether Ct variance is homogeneous across Treatment × Sex × Tissue for each gene.
+> A **significant result** (p < 0.05) indicates heteroscedasticity — relevant for model selection.
+
+```{r ct-levene}
+ct_levene <- run_levene(
+  data         = data_ct,
+  response_var = "Ct",
+  group_var    = "Gene",
+  formula_rhs  = "Treatment * Sex * Tissue"
+)
+
+sig_table(ct_levene, caption = "Levene Test — Ct homogeneity of variance by gene")
+```
+
+## 1.4. Ct GLM Analysis
+
+> **Model specification:** `Ct ~ predictors` with family selected automatically
+> by AIC comparison in section 1.4.0 (consensus across all genes).
+> Type II Likelihood Ratio (LR) tests are used for all terms.
+
+### 1.4.0. GLM Family Selection
+
+> The optimal GLM family for Ct is selected **per gene** by comparing AIC across
+> three candidate specifications fitted with the additive formula.
+> The **consensus family** (winner in most genes) is then used automatically in
+> all hypothesis-testing models (sections 1.4.1–1.4.3).
+> This table is intended for **Supplementary Material**.
+>
+> Candidate families: `Gamma(log)`, `Gamma(inverse)`, `Gaussian(identity)`.
+> All are valid because Ct values are strictly positive (range: 
+> `r round(min(data_ct$Ct), 1)` – `r round(max(data_ct$Ct), 1)`).
+> The winning AIC per gene is highlighted in **green**.
+
+```{r ct-family-selection-fit, include=FALSE}
+ct_family_aic <- family_selection_aic(
+  data         = data_ct,
+  response_var = "Ct",
+  group_var    = "Gene",
+  formula_rhs  = "Treatment + Sex + Tissue"
+)
+
+consensus_ct <- get_consensus_family(ct_family_aic, data_ct, "Ct")
+```
+
+```{r ct-family-selection-table}
+format_family_table(ct_family_aic, "Gene") %>%
+  kable(format   = "html",
+        escape   = FALSE,
+        caption  = "Supplementary — Family selection AIC per gene (additive model)",
+        align    = "c") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE, font_size = 12)
+```
+
+> **Consensus family selected: `r consensus_ct$name`**  
+> (`r max(consensus_ct$counts)` of `r consensus_ct$n_total` genes).
+> All models in sections 1.4.1–1.4.3 use this family automatically.
+
+### 1.4.1. Interaction Model — `Treatment * Sex * Tissue`
+
+```{r ct-glm-interaction-fit, include=FALSE}
+models_ct_int <- fit_glm_list(
+  data         = data_ct,
+  response_var = "Ct",
+  group_var    = "Gene",
+  formula_rhs  = "Treatment * Sex * Tissue",
+  family       = consensus_ct$family
+)
+```
+
+
+#### ANOVA Results (Type II LR Test)
+
+```{r ct-anova-interaction}
+ct_anova_int <- glm_list_anova(models_ct_int, group_var = "Gene")
+sig_table(ct_anova_int, caption = "Interaction GLM — ANOVA Type II LR test (Ct ~ Treatment * Sex * Tissue)")
+```
+
+#### Heatmap — P-values by Gene and Condition
+
+> P-values extracted automatically from the interaction GLM results above.
+> Colour scale: **red** = low p-value (significant), **blue** = high p-value (non-significant).
+> Significance markers: `***` p < 0.001 · `**` p < 0.01 · `*` p < 0.05.
+> Labels use scientific notation when p < 0.001, otherwise 3 decimal places.
+> Genes are ordered by their maximum p-value across conditions (most stable at top).
+> Palette: RdYlBu (colorblind-friendly, as recommended by Lin).
+
+```{r ct-heatmap, fig.width=10, fig.height=6}
+# ── Build heatmap data from GLM interaction results ───────────────────────────
+term_labels <- c(
+  "Treatment"              = "Treatment",
+  "Sex"                    = "Sex",
+  "Tissue"                 = "Tissue",
+  "Treatment:Sex"          = "Treat*Sex",
+  "Treatment:Tissue"       = "Treat*Tissue",
+  "Sex:Tissue"             = "Sex*Tissue",
+  "Treatment:Sex:Tissue"   = "Treat*Sex*Tissue"
+)
+
+condition_order <- c("Treatment", "Sex", "Tissue",
+                     "Treat*Sex", "Treat*Tissue",
+                     "Sex*Tissue", "Treat*Sex*Tissue")
+
+heatmap_data <- ct_anova_int %>%
+  filter(Term %in% names(term_labels)) %>%
+  mutate(
+    Condition = factor(term_labels[Term], levels = condition_order),
+    Gene      = as.character(Gene)
+  ) %>%
+  select(Gene, Condition, Pr_Chi)
+
+# Order genes by maximum p-value descending
+gene_order <- heatmap_data %>%
+  group_by(Gene) %>%
+  summarise(max_p = max(Pr_Chi, na.rm = TRUE), .groups = "drop") %>%
+  arrange(desc(max_p)) %>%
+  pull(Gene)
+
+heatmap_data$Gene <- factor(heatmap_data$Gene, levels = gene_order)
+
+# ── Labels and significance annotation ───────────────────────────────────────
+heatmap_data <- heatmap_data %>%
+  mutate(
+    # P-value label: scientific if < 0.001, else 3 decimal places
+    p_label = ifelse(
+      Pr_Chi < 0.001,
+      formatC(Pr_Chi, format = "e", digits = 2),
+      formatC(round(Pr_Chi, 3), format = "f", digits = 3)
+    ),
+    # Significance stars on a second line below the p-value
+    sig_label = dplyr::case_when(
+      Pr_Chi < 0.001 ~ "***",
+      Pr_Chi < 0.01  ~ "**",
+      Pr_Chi < 0.05  ~ "*",
+      TRUE           ~ ""
+    ),
+    # Combined label: p-value + stars (newline separator)
+    full_label = ifelse(
+      sig_label == "",
+      p_label,
+      paste0(p_label, "\n", sig_label)
+    )
+  )
+
+# ── Plot ──────────────────────────────────────────────────────────────────────
+p_heatmap <- ggplot(heatmap_data,
+                    aes(x = Condition, y = Gene, fill = Pr_Chi)) +
+  # Base tiles — uniform border, no significance overlay
+  geom_tile(colour = "black", linewidth = 0.4) +
+  # Combined p-value + stars label
+  geom_text(aes(label = full_label),
+            size = 3.2, color = "black", lineheight = 0.85) +
+  scale_fill_distiller(
+    palette   = "RdYlBu",
+    direction = 1,          # low p (significant) → red; high p → blue
+    limits    = c(0, 1),
+    name      = "P-value"
+  ) +
+  scale_x_discrete(limits = condition_order) +
+  labs(x = "Conditions", y = "Gene") +
+  theme_minimal() +
+  theme(
+    axis.text.y       = element_text(color = "black", size = 11, face = "italic"),
+    axis.text.x       = element_text(size = 11, angle = 45,
+                                      vjust = 1, hjust = 1, color = "black"),
+    axis.title.y      = element_text(size = 14, face = "bold"),
+    axis.title.x      = element_text(size = 14, face = "bold"),
+    axis.ticks        = element_line(colour = "black", linewidth = 0.8),
+    axis.ticks.length = unit(6, "pt"),
+    legend.text       = element_text(size = 10),
+    legend.title      = element_text(face = "bold", size = 14),
+    panel.background  = element_rect(fill = "white", color = "black"),
+    panel.grid        = element_blank()
+  )
+
+print(p_heatmap)
+ggsave("../outputs/03_Ct_heatmap_interaction.png", plot = p_heatmap,
+       width = 10, height = 6, dpi = 400)
+```
+
+
+
+#### Q-Q Plots of Residuals
+
+```{r ct-qq-interaction, fig.width=10, fig.height=fig_h_ct}
+p_qq_int <- plot_qq(models_ct_int, ncols = 2)
+print(p_qq_int)
+ggsave("../outputs/05_Ct_QQ_interaction.png", plot = p_qq_int,
+       width = 10, height = fig_h_ct, dpi = 400)
+```
+
+#### Residual Histograms
+
+```{r ct-resid-interaction, fig.width=10, fig.height=fig_h_ct}
+p_res_int <- plot_residuals(models_ct_int, ncols = 2)
+print(p_res_int)
+ggsave("../outputs/06_Ct_residuals_interaction.png", plot = p_res_int,
+       width = 10, height = fig_h_ct, dpi = 400)
+```
+
+### 1.4.2. Model Comparison — AIC (Additive vs. Interaction)
+
+> **Interpretation:** ΔAIC > 2 favours the interaction model; |ΔAIC| < 2 indicates
+> equivalent support and the simpler (additive) model is preferred by parsimony.
+> This table is provided as supplementary justification for model selection.
+
+```{r ct-aic}
+ct_aic <- compare_aic(
+  data         = data_ct,
+  response_var = "Ct",
+  group_var    = "Gene",
+  formula_add  = "Treatment + Sex + Tissue",
+  formula_int  = "Treatment * Sex * Tissue",
+  family       = consensus_ct$family
+)
+
+ct_aic %>%
+  kable(caption = "AIC comparison — Additive vs Interaction Ct GLMs",
+        align = "c", digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE, font_size = 12) %>%
+  column_spec(which(names(ct_aic) == "Preferred"),
+              bold = TRUE,
+              color = ifelse(ct_aic$Preferred == "Interaction",
+                             "#c0392b", "#27ae60")) %>%
+  scroll_box(width = "100%")
+```
+
+```{r ct-aic-interpretation, results='asis'}
+# ── Automatic AIC interpretation paragraph ────────────────────────────────────
+n_add  <- sum(ct_aic$Preferred == "Additive")
+n_int  <- sum(ct_aic$Preferred == "Interaction")
+n_tot  <- nrow(ct_aic)
+
+# Genes where interaction wins
+int_genes <- ct_aic$Gene[ct_aic$Preferred == "Interaction"]
+int_genes_txt <- if (length(int_genes) == 0) {
+  "none"
+} else {
+  paste(paste0("*", int_genes, "*"), collapse = ", ")
+}
+
+# Overall conclusion
+if (n_add >= n_tot * 0.75) {
+  conclusion <- paste0(
+    "The additive model was preferred in **", n_add, " of ", n_tot,
+    "** genes (|ΔAIC| > 2), indicating that interactions between ",
+    "Treatment, Sex, and Tissue do not explain substantial additional ",
+    "variance in Ct values. This supports interpreting the effects of ",
+    "each factor independently."
+  )
+} else if (n_int >= n_tot * 0.75) {
+  conclusion <- paste0(
+    "The interaction model was preferred in **", n_int, " of ", n_tot,
+    "** genes (|ΔAIC| > 2), suggesting that the effect of at least one ",
+    "factor on Ct depends on the levels of another factor."
+  )
+} else {
+  conclusion <- paste0(
+    "Model preference was mixed: the additive model was favoured in **",
+    n_add, "** genes and the interaction model in **", n_int,
+    "** of ", n_tot, " genes. ",
+    if (length(int_genes) > 0)
+      paste0("Genes showing interaction support: ", int_genes_txt, ".")
+    else ""
+  )
+}
+
+cat("> 📊 **Automatic AIC summary:** ", conclusion, "\n")
+```
+
+
+---
+
+# 2. Relative Expression Analysis (EGR)
+
+> **Context:** EGR values result from RefFinder / geNorm rankings. The `Quality`
+> variable classifies genes as "worst" or "best" reference genes based on their
+> stability scores. The goal is to compare how expression results change when
+> normalizing with each set.
+
+## 2.1. EGR Summary
+
+```{r egr-summary}
+summary(data_EGR) %>%
+  kable(caption = "Summary statistics — EGR data") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE, font_size = 12) %>%
+  scroll_box(width = "100%")
+```
+
+## 2.2. EGR Distribution
+
+### 2.2.1. Raw EGR Distribution
+
+```{r egr-distribution, fig.width=10, fig.height=5}
+p_egr_dist <- plot_distribution(
+  data         = data_EGR,
+  x_var        = "EGR",
+  group_var    = "Quality",
+  title_prefix = "EGR distribution —",
+  x_label      = "EGR",
+  fill_color   = "#FF6666",
+  ncols        = 2
+)
+
+print(p_egr_dist)
+ggsave("../outputs/07_EGR_distribution.png", plot = p_egr_dist,
+       width = 10, height = 5, dpi = 400)
+```
+
+### 2.2.2. Log(EGR) Distribution
+
+```{r egr-log-distribution, fig.width=10, fig.height=5}
+p_loegr_dist <- plot_distribution(
+  data         = data_EGR,
+  x_var        = "Log_EGR",
+  group_var    = "Quality",
+  title_prefix = "log(EGR) distribution —",
+  x_label      = "log(EGR)",
+  fill_color   = "#66b2ff",
+  ncols        = 2
+)
+
+print(p_loegr_dist)
+ggsave("../outputs/08_LogEGR_distribution.png", plot = p_loegr_dist,
+       width = 10, height = 5, dpi = 400)
+```
+
+## 2.3. EGR Homogeneity of Variance (Levene Test)
+
+### 2.3.1. Raw EGR
+
+```{r egr-levene}
+egr_levene <- run_levene(
+  data         = data_EGR,
+  response_var = "EGR",
+  group_var    = "Quality",
+  formula_rhs  = "Treatment * Sex * Tissue"
+)
+
+sig_table(egr_levene,
+          caption = "Levene Test — EGR homogeneity of variance by gene quality")
+```
+
+### 2.3.2. Log(EGR)
+
+```{r egr-log-levene}
+log_egr_levene <- run_levene(
+  data         = data_EGR,
+  response_var = "Log_EGR",
+  group_var    = "Quality",
+  formula_rhs  = "Treatment * Sex * Tissue"
+)
+
+sig_table(log_egr_levene,
+          caption = "Levene Test — log(EGR) homogeneity of variance by gene quality")
+```
+
+## 2.4. Barplots — Worst vs Best Reference Genes
+
+```{r egr-barplots, fig.width=10, fig.height=fig_h_egr_bar}
+qualities  <- unique(data_EGR$Quality)
+barplots   <- lapply(qualities, function(q) {
+  barplot_egr(data_EGR %>% filter(Quality == q), quality_label = q)
+})
+names(barplots) <- as.character(qualities)
+
+p_bars <- do.call(ggarrange,
+                  c(barplots,
+                    list(ncol = 1, nrow = length(qualities),
+                         common.legend = TRUE, legend = "bottom")))
+
+print(p_bars)
+ggsave("../outputs/09_EGR_barplots.png", plot = p_bars,
+       width = 10, height = fig_h_egr_bar, dpi = 400)
+```
+
+## 2.5. Log(EGR) GLM Analysis
+
+> **Family auto-selected: `gaussian(link = "identity")`.**
+> Log(EGR) contains negative values 
+> (range: `r round(min(data_EGR$Log_EGR), 2)` – `r round(max(data_EGR$Log_EGR), 2)`),
+> which are incompatible with Gamma distributions (requiring Y > 0 strictly).
+> No AIC family comparison is needed — Gaussian is the only valid candidate.
+> This is equivalent to a standard linear model; Type II LR tests are used for effects.
+
+### 2.5.1. Interaction Model — `Treatment * Sex * Tissue`
+
+```{r egr-glm-interaction-fit, include=FALSE}
+models_egr_int <- fit_glm_list(
+  data         = data_EGR,
+  response_var = "Log_EGR",
+  group_var    = "Quality",
+  formula_rhs  = "Treatment * Sex * Tissue",
+  family       = gaussian(link = "identity")
+)
+```
+
+#### ANOVA Results (Type II F-Test)
+
+```{r egr-anova-interaction}
+egr_anova_int <- glm_list_anova(models_egr_int, group_var = "Quality")
+sig_table(egr_anova_int,
+          caption = "Interaction GLM — ANOVA Type II LR test (log(EGR) ~ Treatment * Sex * Tissue)")
+```
+
+#### Q-Q Plots of Residuals
+
+```{r egr-qq-interaction, fig.width=10, fig.height=5}
+p_egr_qq_int <- plot_qq(models_egr_int, ncols = 2)
+print(p_egr_qq_int)
+ggsave("../outputs/12_EGR_QQ_interaction.png", plot = p_egr_qq_int,
+       width = 10, height = 5, dpi = 400)
+```
+
+#### Residual Histograms
+
+```{r egr-resid-interaction, fig.width=10, fig.height=5}
+p_egr_res_int <- plot_residuals(models_egr_int, ncols = 2)
+print(p_egr_res_int)
+ggsave("../outputs/13_EGR_residuals_interaction.png", plot = p_egr_res_int,
+       width = 10, height = 5, dpi = 400)
+```
+
+### 2.5.2. Model Comparison — AIC (Additive vs. Interaction)
+
+```{r egr-aic}
+egr_aic <- compare_aic(
+  data         = data_EGR,
+  response_var = "Log_EGR",
+  group_var    = "Quality",
+  formula_add  = "Treatment + Sex + Tissue",
+  formula_int  = "Treatment * Sex * Tissue",
+  family       = gaussian(link = "identity")
+)
+
+egr_aic %>%
+  kable(caption = "AIC comparison — Additive vs Interaction log(EGR) GLMs",
+        align = "c", digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE, font_size = 12) %>%
+  column_spec(which(names(egr_aic) == "Preferred"),
+              bold = TRUE,
+              color = ifelse(egr_aic$Preferred == "Interaction",
+                             "#c0392b", "#27ae60")) %>%
+  scroll_box(width = "100%")
+```
+
+```{r egr-aic-interpretation, results='asis'}
+# ── Automatic AIC interpretation paragraph ────────────────────────────────────
+n_add_e <- sum(egr_aic$Preferred == "Additive")
+n_int_e <- sum(egr_aic$Preferred == "Interaction")
+n_tot_e <- nrow(egr_aic)
+
+int_qual <- egr_aic$Quality[egr_aic$Preferred == "Interaction"]
+int_qual_txt <- if (length(int_qual) == 0) "none" else
+  paste0("*", int_qual, "*", collapse = ", ")
+
+if (n_add_e == n_tot_e) {
+  egr_conclusion <- paste0(
+    "The additive model was preferred for **all ", n_tot_e,
+    "** gene quality groups (|ΔAIC| > 2), indicating that interactions ",
+    "between Treatment, Sex, and Tissue do not improve the explanation ",
+    "of log(EGR) variance. Effects of each factor can be interpreted independently."
+  )
+} else if (n_int_e == n_tot_e) {
+  egr_conclusion <- paste0(
+    "The interaction model was preferred for **all ", n_tot_e,
+    "** gene quality groups, suggesting that the combined effect of ",
+    "Treatment, Sex, and Tissue on log(EGR) is not additive."
+  )
+} else {
+  egr_conclusion <- paste0(
+    "Model preference differed by gene quality group: additive preferred ",
+    "in **", n_add_e, "** and interaction in **", n_int_e, "** of ",
+    n_tot_e, " groups. Groups favouring the interaction model: ",
+    int_qual_txt, "."
+  )
+}
+
+cat("> 📊 **Automatic AIC summary:** ", egr_conclusion, "\n")
+```
+
+
+---
+
+```{r session-info, include=TRUE, echo=FALSE}
+sessionInfo() %>%
+  capture.output() %>%
+  paste(collapse = "\n") %>%
+  cat()
+```

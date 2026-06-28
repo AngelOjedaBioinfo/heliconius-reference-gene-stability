@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "Heliconius Reference Gene Stability: qPCR Ct and Relative Expression Analysis Pipeline"
+type: software
+authors:
+  - family-names: "Ojeda Montesdeoca"
+    given-names: "Ángel Andrés"
+    orcid: "https://orcid.org/0009-0008-7799-9525"
+    affiliation: "Universidad Regional Amazónica Ikiam"
+version: 1.0.0
+date-released: "2026-06-28"
+url: "https://github.com/AngelOjedaBioinfo/heliconius-reference-gene-stability"
+repository-code: "https://github.com/AngelOjedaBioinfo/heliconius-reference-gene-stability"
+license: MIT
+keywords:
+  - qPCR
+  - reference genes
+  - geNorm
+  - RefFinder
+  - Heliconius
+  - thermal stress
+  - GLM
+  - bioinformatics
+# Acknowledgments (informational only, not part of the CFF schema):
+# Developed for a manuscript in preparation led by Paola Calderón and
+# Joshué Ruiz, with Leo Camino and Caroline Bacquet. Methodological input
+# also from Shane Wright (LMU Munich), acknowledged in README.md (not a
+# coauthor, per his own request — confirmed by the corresponding authors).
