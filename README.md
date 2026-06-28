@@ -1,6 +1,6 @@
 # Heliconius Reference Gene Stability
 
-Statistical analysis pipeline for evaluating **reference gene stability under thermal stress** in *Heliconius erato lativitta*. The pipeline combines qPCR Ct data with external geNorm / NormFinder / BestKeeper / RefFinder stability rankings to test how the choice of normalization gene set affects downstream relative expression results.
+Statistical analysis pipeline for evaluating reference gene stability under thermal stress in *Heliconius erato lativitta*. The pipeline combines qPCR Ct data with external geNorm / NormFinder / BestKeeper / RefFinder stability rankings to test how the choice of normalization gene set affects downstream relative expression results.
 
 [![DOI](https://zenodo.org/badge/DOI/PENDING.svg)](https://doi.org/PENDING)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -9,14 +9,14 @@ Statistical analysis pipeline for evaluating **reference gene stability under th
 
 ## Overview
 
-The analysis runs in two stages:
+The analysis runs in two stages.
 
-1. **Ct-level analysis** — for each candidate gene, a GLM family (Gamma(log), Gamma(inverse), or Gaussian(identity)) is auto-selected by AIC, then used consistently across all hypothesis-testing models for that stage. Additive (`Treatment + Sex + Tissue`) and full-interaction (`Treatment * Sex * Tissue`) models are compared by AIC (ΔAIC > 2 threshold), and Type II Likelihood-Ratio tests are reported for every term.
-2. **Relative expression (EGR) analysis** — genes are split into `best` / `worst` reference-gene groups based on external geNorm/RefFinder stability rankings (computed upstream, outside this repo). The same GLM + Type II LR workflow is then applied to `log(EGR)` to test whether normalization-gene quality changes the detected Treatment × Sex × Tissue effects.
+1. **Ct-level analysis.** For each candidate gene, a GLM family (Gamma(log), Gamma(inverse), or Gaussian(identity)) is auto-selected by AIC and used across all hypothesis-testing models in this stage. Additive (`Treatment + Sex + Tissue`) and full-interaction (`Treatment * Sex * Tissue`) models are compared by AIC (ΔAIC > 2 threshold), and Type II Likelihood-Ratio tests are reported for every term.
+2. **Relative expression (EGR) analysis.** Genes are split into `best` / `worst` reference-gene groups based on external geNorm/RefFinder stability rankings, computed upstream and outside this repo. The same GLM and Type II LR workflow is then applied to `log(EGR)` to test whether normalization-gene quality changes the detected Treatment × Sex × Tissue effects.
 
-Every model is accompanied by Levene's test for homogeneity of variance, Q-Q plots, and residual histograms, so model fit can be checked rather than assumed.
+Every model is checked, not just fitted: Levene's test for homogeneity of variance, Q-Q plots, and residual histograms are produced for each one.
 
-The script is parametric in genes and groups: it loops over whatever genes/quality groups are present in the input data, so it can be re-run on a different gene panel or experiment without code changes.
+The script is parametric in genes and groups. It loops over whatever genes and quality groups are present in the input data, so it can be re-run on a different gene panel or experiment without code changes.
 
 ## Repository structure
 
@@ -34,7 +34,7 @@ heliconius-reference-gene-stability/
 └── README.md
 ```
 
-`outputs/` (individual PNG figures) is generated on render but not tracked in git — the knitted HTML report already contains every figure at full resolution.
+`outputs/` (individual PNG figures) is generated on render but isn't tracked in git. The knitted HTML report already contains every figure at full resolution, so the loose PNGs would just duplicate it.
 
 ## How to run
 
@@ -48,10 +48,11 @@ rmarkdown::render("analysis/reference_gene_stability_analysis.Rmd")
 
 ## Methods summary
 
-- **Family selection by AIC** — rather than assuming a single error distribution for every gene, the script fits all valid candidate families (Gamma requires strictly positive values; Gaussian is the fallback for response variables that can be zero or negative, e.g. `log(EGR)`) and picks a consensus family per analysis stage.
-- **Model comparison by AIC** — additive vs. interaction models are compared per group, with |ΔAIC| > 2 as the threshold for preferring the more complex model, balancing fit against parsimony.
-- **Type II Likelihood-Ratio tests** — used for all GLM terms, appropriate for unbalanced designs with no implied ordering between Treatment, Sex, and Tissue.
-- **Diagnostics** — Levene's test, Q-Q plots, and residual histograms are produced automatically for every fitted model.
+Rather than assuming one error distribution for every gene, the script fits all valid GLM families per gene (Gamma needs strictly positive values; Gaussian is the fallback when a response can be zero or negative, like `log(EGR)`) and picks whichever wins on AIC most often as the consensus family for that stage.
+
+Additive and interaction models are then compared per group by AIC, using |ΔAIC| > 2 as the cutoff for preferring the more complex model. Below that threshold, the simpler additive model wins on parsimony.
+
+All GLM terms are tested with Type II Likelihood-Ratio tests, which don't assume an ordering between Treatment, Sex, and Tissue, so they fit the unbalanced design used here. Levene's test, Q-Q plots, and residual histograms are generated automatically for every fitted model, so the fit can be checked rather than assumed.
 
 ## Case study: *H. erato lativitta* thermal-stress reference-gene panel
 
@@ -69,4 +70,4 @@ This pipeline was developed for a manuscript in preparation led by Paola Calder�
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).

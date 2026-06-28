@@ -1,6 +1,6 @@
-# Data dictionary — `All_data.xlsx`
+# Data dictionary: `All_data.xlsx`
 
-> **Draft.** Column names and value categories below are inferred directly from the analysis script (`analysis/reference_gene_stability_analysis.Rmd`). Confirm against the actual file once it's in place and correct anything that doesn't match — in particular the exact gene names/IDs in `Gene`, and whether `Quality` has only `best`/`worst` or additional categories.
+> **Draft.** Column names and value categories below are inferred directly from the analysis script (`analysis/reference_gene_stability_analysis.Rmd`). Confirm against the actual file once it's in place, and correct anything that doesn't match: in particular the exact gene names/IDs in `Gene`, and whether `Quality` has only `best`/`worst` or additional categories.
 
 ## Sheet `Cq_tagged`
 
@@ -17,7 +17,7 @@
 | Column      | Type    | Description                                                              |
 |-------------|---------|---------------------------------------------------------------------------|
 | `Gene`      | factor  | Candidate reference gene ID                                              |
-| `Quality`   | factor  | Gene-stability classification (`best` / `worst`) from external geNorm / NormFinder / BestKeeper / RefFinder ranking — computed upstream, not by this repo |
+| `Quality`   | factor  | Gene-stability classification (`best` / `worst`) from external geNorm / NormFinder / BestKeeper / RefFinder ranking, computed upstream and not by this repo |
 | `Treatment` | factor  | `Cold` / `Heat` / `Control`                                               |
 | `Sex`       | factor  | `Male` / `Female`                                                        |
 | `Tissue`    | factor  | `H` / `T` / `A`                                                          |
@@ -26,5 +26,5 @@
 
 ## Notes
 
-- Both sheets are read with `na.omit()` applied immediately after typing — rows with missing values in any used column are dropped silently by the script, not flagged.
+- Both sheets are read with `na.omit()` applied right after typing, so rows with missing values in any used column are dropped silently, not flagged.
 - The stability ranking that produces `Quality` is **not computed in this repository**. It comes from a separate geNorm/RefFinder step run upstream; this pipeline only tests the downstream statistical consequences of that ranking.

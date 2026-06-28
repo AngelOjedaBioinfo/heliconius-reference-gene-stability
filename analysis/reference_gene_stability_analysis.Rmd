@@ -244,7 +244,7 @@ compare_aic <- function(data, response_var, group_var,
 
 # ── Auto family candidates based on data range ────────────────────────────────
 #   Gamma requires strictly positive Y. If Y has zeros or negatives, only
-#   Gaussian(identity) is returned — no AIC selection is needed.
+#   Gaussian(identity) is returned: no AIC selection is needed.
 auto_family_candidates <- function(y) {
   if (any(y <= 0, na.rm = TRUE)) {
     list("Gaussian(identity)" = gaussian(link = "identity"))
@@ -335,7 +335,7 @@ format_family_table <- function(aic_df, group_var) {
 #   quality_label is shown as a styled badge inside the plot (top-left),
 #   so it integrates with the design without replacing any existing element.
 barplot_egr <- function(data_egr, quality_label,
-                         y_label = "Relative Gene Expression — log(EGR)") {
+                         y_label = "Relative Gene Expression: log(EGR)") {
   df <- data_summary(data_egr, varname = "Log_EGR",
                      groupnames = c("Tissue", "Treatment", "Sex")) %>%
     mutate(Tissue = dplyr::recode(Tissue,
@@ -406,7 +406,7 @@ Caroline Bacquet - `caroline.bacquet@ikiam.edu.ec` - Universidad Regional Amazó
 
 ```{r load-data, include=FALSE}
 # NOTE: This script lives in analysis/. Data lives in ../data/All_data.xlsx
-# (relative to this file) — knitr sets the working directory to the Rmd's
+# (relative to this file): knitr sets the working directory to the Rmd's
 # own location automatically, so no setwd() is needed.
 
 dir.create("../outputs", showWarnings = FALSE)   # Save all figures here (gitignored)
@@ -452,7 +452,7 @@ fig_h_egr_bar <- n_quality * 5.0              # ~5 in per quality group
 
 ```{r ct-summary, echo=FALSE}
 summary(data_ct) %>%
-  kable(caption = "Summary statistics — Ct values") %>%
+  kable(caption = "Summary statistics: Ct values") %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
                 full_width = FALSE, font_size = 12) %>%
   scroll_box(width = "100%")
@@ -557,7 +557,7 @@ p_ct_dist <- plot_distribution(
   data         = data_ct,
   x_var        = "Ct",
   group_var    = "Gene",
-  title_prefix = "Ct distribution —",
+  title_prefix = "Ct distribution:",
   x_label      = "Ct"
 )
 
@@ -569,7 +569,7 @@ ggsave("../outputs/02_Ct_distribution.png", plot = p_ct_dist,
 ### 1.3.1. Ct Homogeneity of Variance (Levene Test)
 
 > Tests whether Ct variance is homogeneous across Treatment × Sex × Tissue for each gene.
-> A **significant result** (p < 0.05) indicates heteroscedasticity — relevant for model selection.
+> A **significant result** (p < 0.05) indicates heteroscedasticity: relevant for model selection.
 
 ```{r ct-levene}
 ct_levene <- run_levene(
@@ -579,7 +579,7 @@ ct_levene <- run_levene(
   formula_rhs  = "Treatment * Sex * Tissue"
 )
 
-sig_table(ct_levene, caption = "Levene Test — Ct homogeneity of variance by gene")
+sig_table(ct_levene, caption = "Levene Test: Ct homogeneity of variance by gene")
 ```
 
 ## 1.4. Ct GLM Analysis
@@ -616,7 +616,7 @@ consensus_ct <- get_consensus_family(ct_family_aic, data_ct, "Ct")
 format_family_table(ct_family_aic, "Gene") %>%
   kable(format   = "html",
         escape   = FALSE,
-        caption  = "Supplementary — Family selection AIC per gene (additive model)",
+        caption  = "Supplementary: Family selection AIC per gene (additive model)",
         align    = "c") %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
                 full_width = FALSE, font_size = 12)
@@ -626,7 +626,7 @@ format_family_table(ct_family_aic, "Gene") %>%
 > (`r max(consensus_ct$counts)` of `r consensus_ct$n_total` genes).
 > All models in sections 1.4.1–1.4.3 use this family automatically.
 
-### 1.4.1. Interaction Model — `Treatment * Sex * Tissue`
+### 1.4.1. Interaction Model: `Treatment * Sex * Tissue`
 
 ```{r ct-glm-interaction-fit, include=FALSE}
 models_ct_int <- fit_glm_list(
@@ -643,10 +643,10 @@ models_ct_int <- fit_glm_list(
 
 ```{r ct-anova-interaction}
 ct_anova_int <- glm_list_anova(models_ct_int, group_var = "Gene")
-sig_table(ct_anova_int, caption = "Interaction GLM — ANOVA Type II LR test (Ct ~ Treatment * Sex * Tissue)")
+sig_table(ct_anova_int, caption = "Interaction GLM: ANOVA Type II LR test (Ct ~ Treatment * Sex * Tissue)")
 ```
 
-#### Heatmap — P-values by Gene and Condition
+#### Heatmap: P-values by Gene and Condition
 
 > P-values extracted automatically from the interaction GLM results above.
 > Colour scale: **red** = low p-value (significant), **blue** = high p-value (non-significant).
@@ -715,7 +715,7 @@ heatmap_data <- heatmap_data %>%
 # ── Plot ──────────────────────────────────────────────────────────────────────
 p_heatmap <- ggplot(heatmap_data,
                     aes(x = Condition, y = Gene, fill = Pr_Chi)) +
-  # Base tiles — uniform border, no significance overlay
+  # Base tiles: uniform border, no significance overlay
   geom_tile(colour = "black", linewidth = 0.4) +
   # Combined p-value + stars label
   geom_text(aes(label = full_label),
@@ -768,7 +768,7 @@ ggsave("../outputs/06_Ct_residuals_interaction.png", plot = p_res_int,
        width = 10, height = fig_h_ct, dpi = 400)
 ```
 
-### 1.4.2. Model Comparison — AIC (Additive vs. Interaction)
+### 1.4.2. Model Comparison: AIC (Additive vs. Interaction)
 
 > **Interpretation:** ΔAIC > 2 favours the interaction model; |ΔAIC| < 2 indicates
 > equivalent support and the simpler (additive) model is preferred by parsimony.
@@ -785,7 +785,7 @@ ct_aic <- compare_aic(
 )
 
 ct_aic %>%
-  kable(caption = "AIC comparison — Additive vs Interaction Ct GLMs",
+  kable(caption = "AIC comparison: Additive vs Interaction Ct GLMs",
         align = "c", digits = 2) %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
                 full_width = FALSE, font_size = 12) %>%
@@ -853,7 +853,7 @@ cat("> 📊 **Automatic AIC summary:** ", conclusion, "\n")
 
 ```{r egr-summary}
 summary(data_EGR) %>%
-  kable(caption = "Summary statistics — EGR data") %>%
+  kable(caption = "Summary statistics: EGR data") %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
                 full_width = FALSE, font_size = 12) %>%
   scroll_box(width = "100%")
@@ -868,7 +868,7 @@ p_egr_dist <- plot_distribution(
   data         = data_EGR,
   x_var        = "EGR",
   group_var    = "Quality",
-  title_prefix = "EGR distribution —",
+  title_prefix = "EGR distribution:",
   x_label      = "EGR",
   fill_color   = "#FF6666",
   ncols        = 2
@@ -886,7 +886,7 @@ p_loegr_dist <- plot_distribution(
   data         = data_EGR,
   x_var        = "Log_EGR",
   group_var    = "Quality",
-  title_prefix = "log(EGR) distribution —",
+  title_prefix = "log(EGR) distribution:",
   x_label      = "log(EGR)",
   fill_color   = "#66b2ff",
   ncols        = 2
@@ -910,7 +910,7 @@ egr_levene <- run_levene(
 )
 
 sig_table(egr_levene,
-          caption = "Levene Test — EGR homogeneity of variance by gene quality")
+          caption = "Levene Test: EGR homogeneity of variance by gene quality")
 ```
 
 ### 2.3.2. Log(EGR)
@@ -924,10 +924,10 @@ log_egr_levene <- run_levene(
 )
 
 sig_table(log_egr_levene,
-          caption = "Levene Test — log(EGR) homogeneity of variance by gene quality")
+          caption = "Levene Test: log(EGR) homogeneity of variance by gene quality")
 ```
 
-## 2.4. Barplots — Worst vs Best Reference Genes
+## 2.4. Barplots: Worst vs Best Reference Genes
 
 ```{r egr-barplots, fig.width=10, fig.height=fig_h_egr_bar}
 qualities  <- unique(data_EGR$Quality)
@@ -952,10 +952,10 @@ ggsave("../outputs/09_EGR_barplots.png", plot = p_bars,
 > Log(EGR) contains negative values 
 > (range: `r round(min(data_EGR$Log_EGR), 2)` – `r round(max(data_EGR$Log_EGR), 2)`),
 > which are incompatible with Gamma distributions (requiring Y > 0 strictly).
-> No AIC family comparison is needed — Gaussian is the only valid candidate.
+> No AIC family comparison is needed: Gaussian is the only valid candidate.
 > This is equivalent to a standard linear model; Type II LR tests are used for effects.
 
-### 2.5.1. Interaction Model — `Treatment * Sex * Tissue`
+### 2.5.1. Interaction Model: `Treatment * Sex * Tissue`
 
 ```{r egr-glm-interaction-fit, include=FALSE}
 models_egr_int <- fit_glm_list(
@@ -972,7 +972,7 @@ models_egr_int <- fit_glm_list(
 ```{r egr-anova-interaction}
 egr_anova_int <- glm_list_anova(models_egr_int, group_var = "Quality")
 sig_table(egr_anova_int,
-          caption = "Interaction GLM — ANOVA Type II LR test (log(EGR) ~ Treatment * Sex * Tissue)")
+          caption = "Interaction GLM: ANOVA Type II LR test (log(EGR) ~ Treatment * Sex * Tissue)")
 ```
 
 #### Q-Q Plots of Residuals
@@ -993,7 +993,7 @@ ggsave("../outputs/13_EGR_residuals_interaction.png", plot = p_egr_res_int,
        width = 10, height = 5, dpi = 400)
 ```
 
-### 2.5.2. Model Comparison — AIC (Additive vs. Interaction)
+### 2.5.2. Model Comparison: AIC (Additive vs. Interaction)
 
 ```{r egr-aic}
 egr_aic <- compare_aic(
@@ -1006,7 +1006,7 @@ egr_aic <- compare_aic(
 )
 
 egr_aic %>%
-  kable(caption = "AIC comparison — Additive vs Interaction log(EGR) GLMs",
+  kable(caption = "AIC comparison: Additive vs Interaction log(EGR) GLMs",
         align = "c", digits = 2) %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
                 full_width = FALSE, font_size = 12) %>%
