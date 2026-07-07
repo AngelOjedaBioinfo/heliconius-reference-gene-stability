@@ -38,7 +38,14 @@ heliconius-reference-gene-stability/
 
 ## How to run
 
-Requirements: R (≥ 4.x) and the packages `knitr`, `rmarkdown`, `readxl`, `dplyr`, `ggplot2`, `ggpubr`, `rstatix`, `tidyr`, `car`, `broom`, `purrr`, `scales`, `kableExtra`, `patchwork`. The script installs any missing package on first run.
+**Recommended: conda environment.** For a reproducible setup, create and activate the provided conda environment:
+
+```bash
+conda env create -f environment.yml
+conda activate ref-gene-stability
+```
+
+**Manual/fallback alternative:** R (≥ 4.x) and the packages `knitr`, `rmarkdown`, `readxl`, `dplyr`, `ggplot2`, `ggpubr`, `rstatix`, `tidyr`, `car`, `broom`, `purrr`, `scales`, `kableExtra`, `patchwork`. The script installs any missing package on first run.
 
 ```r
 rmarkdown::render("analysis/reference_gene_stability_analysis.Rmd")
