@@ -1,0 +1,22 @@
+name: ref-gene-stability
+channels:
+  - conda-forge
+  - bioconda
+  - default
+dependencies:
+  - r-base=4.5.2
+  - r-knitr
+  - r-rmarkdown
+  - r-readxl
+  - r-dplyr
+  - r-ggplot2
+  - r-ggpubr
+  - r-rstatix
+  - r-tidyr
+  - r-car
+  - r-broom
+  - r-purrr
+  - r-scales
+  - r-kableextra
+  - r-patchwork
+  - pandoc
